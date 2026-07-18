@@ -14,8 +14,9 @@ class RunsLoaderService:
         self.repository = RunsRepository(settings.postgres)
 
     def execute(self) -> int:
+        started_date = self.repository.get_max_started_cdmx()
         with DatabricksClient(self.settings.databricks) as client:
-            runs = client.get_runs()
+            runs = client.get_runs(started_date)
 
         records = []
         for run in runs:

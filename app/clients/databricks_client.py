@@ -8,7 +8,7 @@ import requests
 from app.config.settings import DatabricksSettings
 
 UTC_TZ = ZoneInfo("UTC")
-
+CDMX_TZ = ZoneInfo("America/Mexico_City")
 
 class DatabricksClient:
     """Cliente para consultar runs de la API Jobs de Databricks."""
@@ -24,6 +24,22 @@ class DatabricksClient:
             }
         )
 
+    @staticmethod
+    def _cdmx_to_epoch_ms(start_date: datetime) -> int:
+        """
+        Interpreta una fecha sin zona horaria como CDMX
+        y la convierte a epoch milliseconds UTC.
+        """
+
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=CDMX_TZ)
+        else:
+            start_date = start_date.astimezone(CDMX_TZ)
+
+        start_date_utc = start_date.astimezone(UTC_TZ)
+
+        return int(start_date_utc.timestamp() * 1000)        
+
     def _get_query_window(self) -> tuple[int, int]:
         """Obtiene el rango de consulta en epoch milliseconds."""
 
@@ -37,18 +53,42 @@ class DatabricksClient:
 
         return start_ms, end_ms
 
-    def get_runs(self) -> list[dict[str, Any]]:
+    def get_runs(self, start_date: datetime) -> list[dict[str, Any]]:
         """Obtiene todos los runs dentro del rango configurado."""
 
-        start_ms, end_ms = self._get_query_window()
+
+        start_time_from_ms = self._cdmx_to_epoch_ms(start_date)
+        start_time_to_ms = int(datetime.now(tz=UTC_TZ).timestamp() * 1000)
+
+        # start_time_from_ms = self._cdmx_to_epoch_ms(
+        #     start_date
+        # )
+
+        # end_date_utc = datetime.now(tz=UTC_TZ)
+        # start_time_to_ms = int(
+        #     end_date_utc.timestamp() * 1000
+        # )
+
+        logging.info(
+            "Fecha inicial obtenida de PostgreSQL: %s",
+            start_date,
+        )
+
+        logging.info(
+            "Rango enviado a Databricks: "
+            "start_time_from=%s, start_time_to=%s",
+            start_time_from_ms,
+            start_time_to_ms,
+        )
 
         all_runs: list[dict[str, Any]] = []
         page_token: str | None = None
+        page_number = 1
 
         while True:
             params: dict[str, int | str] = {
-                "start_time_from": start_ms,
-                "start_time_to": end_ms,
+                "start_time_from": start_time_from_ms,
+                "start_time_to": start_time_to_ms,
                 "limit": self.settings.page_size,
             }
 
@@ -56,7 +96,7 @@ class DatabricksClient:
                 params["page_token"] = page_token
 
             response = self.session.get(
-                f"{self.settings.host}/api/2.1/jobs/runs/list",
+                f"{self.settings.host}/api/2.2/jobs/runs/list",
                 params=params,
                 timeout=60,
             )
@@ -74,8 +114,8 @@ class DatabricksClient:
                 len(all_runs),
             )
 
-            if not payload.get("has_more", False):
-                break
+            # if not payload.get("has_more", False):
+            #     break
 
             page_token = payload.get("next_page_token")
 
@@ -85,6 +125,13 @@ class DatabricksClient:
                     "sin next_page_token."
                 )
                 break
+            
+            page_number += 1
+
+        logging.info(
+            "Consulta completa. Total de runs obtenidos: %s.",
+            len(all_runs),
+        )            
 
         return all_runs
 

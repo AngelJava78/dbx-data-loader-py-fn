@@ -49,7 +49,7 @@ class Settings:
     @classmethod
     def from_environment(cls) -> "Settings":
         lookback_minutes = int_setting("LOOKBACK_MINUTES", 30)
-        page_size = int_setting("DATABRICKS_PAGE_SIZE", 100)
+        page_size = int_setting("DATABRICKS_PAGE_SIZE", 50)
         batch_size = int_setting("POSTGRES_BATCH_SIZE", 500)
 
         if lookback_minutes <= 0:

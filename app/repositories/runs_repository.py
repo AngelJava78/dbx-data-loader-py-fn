@@ -1,8 +1,8 @@
 from collections.abc import Sequence
-
+from datetime import datetime
 import psycopg2
 from psycopg2.extras import execute_values
-
+from psycopg2.extensions import connection
 from app.config.settings import PostgresSettings
 from app.models.run_record import RunRecord
 
@@ -37,16 +37,16 @@ class RunsRepository:
         parameter_source = EXCLUDED.parameter_source
     """
 
+    SELECT_MAX_STARTED_SQL = """
+        SELECT MAX(started_cdmx)
+        FROM public.runs
+    """
+
     def __init__(self, settings: PostgresSettings) -> None:
         self.settings = settings
 
-    def save_all(self, records: Sequence[RunRecord]) -> int:
-        if not records:
-            return 0
-
-        values = [record.as_tuple() for record in records]
-
-        with psycopg2.connect(
+    def _get_connection(self) -> connection:
+        return psycopg2.connect(
             host=self.settings.host,
             port=self.settings.port,
             dbname=self.settings.database,
@@ -54,7 +54,26 @@ class RunsRepository:
             password=self.settings.password,
             connect_timeout=10,
             application_name="databricks-runs-loader",
-        ) as connection:
+        )  
+
+    def get_max_started_cdmx(self) -> datetime | None:
+        with self._get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(self.SELECT_MAX_STARTED_SQL)
+                result = cursor.fetchone()
+
+        if result is None:
+            return None
+
+        return result[0]          
+
+    def save_all(self, records: Sequence[RunRecord]) -> int:
+        if not records:
+            return 0
+
+        values = [record.as_tuple() for record in records]
+
+        with self._get_connection() as connection:
             with connection.cursor() as cursor:
                 execute_values(
                     cursor,
@@ -64,3 +83,4 @@ class RunsRepository:
                 )
 
         return len(records)
+
