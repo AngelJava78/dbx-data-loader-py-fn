@@ -5,8 +5,12 @@ from app.services.runs_loader_service import RunsLoaderService
 
 app = func.FunctionApp()
 
-@app.timer_trigger(schedule="0 * * * * *", arg_name="timer", run_on_startup=False,
-              use_monitor=True) 
+@app.timer_trigger(
+        schedule="0 */5 * * * *", 
+        arg_name="timer", 
+        run_on_startup=True,
+        use_monitor=True
+) 
 def databricks_runs_loader(timer: func.TimerRequest) -> None:
     """Carga periódicamente los runs de Databricks en PostgreSQL."""
     if timer.past_due:

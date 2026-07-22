@@ -58,7 +58,8 @@ class DatabricksClient:
 
 
         start_time_from_ms = self._cdmx_to_epoch_ms(start_date)
-        start_time_to_ms = int(datetime.now(tz=UTC_TZ).timestamp() * 1000)
+        #start_time_to_ms = int(datetime.now(tz=UTC_TZ).timestamp() * 1000)
+        start_time_to_ms = start_time_from_ms + (2 * 60 * 60 * 1000)
 
         # start_time_from_ms = self._cdmx_to_epoch_ms(
         #     start_date
@@ -100,6 +101,7 @@ class DatabricksClient:
                 params=params,
                 timeout=60,
             )
+            # https://adb-3925217763478917.17.azuredatabricks.net/api/2.2/jobs/runs/list?start_time_from=1783576800000&start_time_to=1783663200000&limit=25
 
             response.raise_for_status()
 
@@ -134,6 +136,31 @@ class DatabricksClient:
         )            
 
         return all_runs
+
+    def get_tasks(self, run_id: int) -> list[dict[str, Any]]:
+        all_tasks: list[dict[str, Any]] = []
+
+        logging.info("Run id: %s", run_id)
+
+        params: dict[str, int | str] = {
+            "run_id": run_id
+        }
+        response = self.session.get(
+            f"{self.settings.host}/api/2.2/jobs/runs/get",
+            params=params,
+            timeout=60,
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        tasks = payload.get("tasks", [])
+        all_tasks.extend(tasks)
+        logging.info(
+            "Consulta completa. Total de tasks obtenidos: %s.",
+            len(all_tasks),
+        )           
+        # https://adb-3925217763478917.17.azuredatabricks.net/api/2.1/jobs/runs/get?run_id=507640030715276
+        return all_tasks
 
     def close(self) -> None:
         """Cierra la sesión HTTP."""

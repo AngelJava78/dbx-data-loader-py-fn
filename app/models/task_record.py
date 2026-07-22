@@ -1,41 +1,39 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from app.models.task_record import TaskRecord
 
-@dataclass
-class RunRecord:
+@dataclass(frozen=True)
+class TaskRecord:
+    task_run_id: int | None
     run_id: int
-    job_id: int | None
-    job_name: str | None
+    task_key: str | None
     started_cdmx: datetime | None
     ended_cdmx: datetime | None
     duration: str | None
-    run_type: str | None
-    result_state: str | None
-    termination_code: str | None
-    workspace_id: int | None
+    task_type: str | None
+    status: str | None
+    notebook_path: str | None
+    notebook_name: str | None
     process_id: int | None
     subprocess_id: int | None
     stage_id: int | None
     substage_id: int | None
-    username: str
-    folio_number: str
-    parameter_source: str
-    tasks: list[TaskRecord] = field(default_factory=list)
-
+    username: str | None
+    folio_number: str | None
+    parameter_source: str | None
+ 
     def as_tuple(self) -> tuple[Any, ...]:
         return (
+            self.task_run_id,
             self.run_id,
-            self.job_id,
-            self.job_name,
+            self.task_key,
             self.started_cdmx,
             self.ended_cdmx,
             self.duration,
-            self.run_type,
-            self.result_state,
-            self.termination_code,
-            self.workspace_id,
+            self.task_type,
+            self.status,
+            self.notebook_path,
+            self.notebook_name,
             self.process_id,
             self.subprocess_id,
             self.stage_id,
