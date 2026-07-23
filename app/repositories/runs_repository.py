@@ -12,7 +12,7 @@ class RunsRepository:
     INSERT INTO public.runs
     (
         run_id, job_id, job_name, started_cdmx, ended_cdmx, duration,
-        run_type, result_state, termination_code, workspace_id,
+        run_type, result_state, termination_code, workspace_id, run_page_url,
         process_id, subprocess_id, stage_id, substage_id,
         username, folio_number, parameter_source
     )
@@ -28,6 +28,7 @@ class RunsRepository:
         result_state = EXCLUDED.result_state,
         termination_code = EXCLUDED.termination_code,
         workspace_id = EXCLUDED.workspace_id,
+        run_page_url = EXCLUDED.run_page_url,
         process_id = EXCLUDED.process_id,
         subprocess_id = EXCLUDED.subprocess_id,
         stage_id = EXCLUDED.stage_id,
@@ -38,14 +39,14 @@ class RunsRepository:
     """
 
     SELECT_MAX_STARTED_SQL = """
-        SELECT MAX(started_cdmx)
+        SELECT COALESCE(MAX(started_cdmx), DATE('2026-07-01'))
         FROM public.runs
     """
 
     def __init__(self, settings: PostgresSettings) -> None:
         self.settings = settings
 
-    def _get_connection(self) -> connection:
+    def get_connection(self) -> connection:
         return psycopg2.connect(
             host=self.settings.host,
             port=self.settings.port,
@@ -57,7 +58,7 @@ class RunsRepository:
         )  
 
     def get_max_started_cdmx(self) -> datetime | None:
-        with self._get_connection() as connection:
+        with self.get_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(self.SELECT_MAX_STARTED_SQL)
                 result = cursor.fetchone()
@@ -73,7 +74,7 @@ class RunsRepository:
 
         values = [record.as_tuple() for record in records]
 
-        with self._get_connection() as connection:
+        with self.get_connection() as connection:
             with connection.cursor() as cursor:
                 execute_values(
                     cursor,

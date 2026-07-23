@@ -10,11 +10,22 @@ from app.config.settings import DatabricksSettings
 UTC_TZ = ZoneInfo("UTC")
 CDMX_TZ = ZoneInfo("America/Mexico_City")
 
+RUNS_LIST_ENDPOINT = "/api/2.2/jobs/runs/list"
+RUNS_GET_ENDPOINT = "/api/2.2/jobs/runs/get"
+
+MAX_RUNS_PAGE_SIZE = 25
+
+
 class DatabricksClient:
-    """Cliente para consultar runs de la API Jobs de Databricks."""
+    """Cliente para consultar runs y tasks mediante Databricks Jobs API 2.2."""
 
     def __init__(self, settings: DatabricksSettings) -> None:
         self.settings = settings
+
+        if not 1 <= self.settings.page_size <= MAX_RUNS_PAGE_SIZE:
+            raise ValueError(
+                "Databricks page_size must be between " f"1 and {MAX_RUNS_PAGE_SIZE}."
+            )
 
         self.session = requests.Session()
         self.session.headers.update(
@@ -25,59 +36,39 @@ class DatabricksClient:
         )
 
     @staticmethod
-    def _cdmx_to_epoch_ms(start_date: datetime) -> int:
+    def cdmx_to_epoch_ms(date: datetime) -> int:
         """
         Interpreta una fecha sin zona horaria como CDMX
         y la convierte a epoch milliseconds UTC.
         """
 
-        if start_date.tzinfo is None:
-            start_date = start_date.replace(tzinfo=CDMX_TZ)
+        if date.tzinfo is None:
+            cdmx_date = date.replace(tzinfo=CDMX_TZ)
         else:
-            start_date = start_date.astimezone(CDMX_TZ)
+            cdmx_date = date.astimezone(CDMX_TZ)
 
-        start_date_utc = start_date.astimezone(UTC_TZ)
+        return int(cdmx_date.timestamp() * 1000)
 
-        return int(start_date_utc.timestamp() * 1000)        
+    def get_runs(
+        self, start_date: datetime, end_date: datetime
+    ) -> list[dict[str, Any]]:
+        """
+        Obtiene todos los runs cuya fecha de inicio pertenece
+        al intervalo lógico [start_date, end_date).
+        """
 
-    def _get_query_window(self) -> tuple[int, int]:
-        """Obtiene el rango de consulta en epoch milliseconds."""
+        if end_date <= start_date:
+            raise ValueError("end_date must be greater than start_date.")
 
-        end_utc = datetime.now(tz=UTC_TZ)
-        start_utc = end_utc - timedelta(
-            minutes=self.settings.lookback_minutes
-        )
-
-        start_ms = int(start_utc.timestamp() * 1000)
-        end_ms = int(end_utc.timestamp() * 1000)
-
-        return start_ms, end_ms
-
-    def get_runs(self, start_date: datetime) -> list[dict[str, Any]]:
-        """Obtiene todos los runs dentro del rango configurado."""
-
-
-        start_time_from_ms = self._cdmx_to_epoch_ms(start_date)
-        #start_time_to_ms = int(datetime.now(tz=UTC_TZ).timestamp() * 1000)
-        start_time_to_ms = start_time_from_ms + (2 * 60 * 60 * 1000)
-
-        # start_time_from_ms = self._cdmx_to_epoch_ms(
-        #     start_date
-        # )
-
-        # end_date_utc = datetime.now(tz=UTC_TZ)
-        # start_time_to_ms = int(
-        #     end_date_utc.timestamp() * 1000
-        # )
+        start_time_from_ms = self.cdmx_to_epoch_ms(start_date)
+        end_time_exclusive_ms = self.cdmx_to_epoch_ms(end_date)
+        start_time_to_ms = end_time_exclusive_ms - 1
 
         logging.info(
-            "Fecha inicial obtenida de PostgreSQL: %s",
+            "Fetching Databricks runs for CDMX interval [%s, %s). "
+            "Epoch interval: start_time_from=%s, start_time_to=%s.",
             start_date,
-        )
-
-        logging.info(
-            "Rango enviado a Databricks: "
-            "start_time_from=%s, start_time_to=%s",
+            end_date,
             start_time_from_ms,
             start_time_to_ms,
         )
@@ -97,7 +88,7 @@ class DatabricksClient:
                 params["page_token"] = page_token
 
             response = self.session.get(
-                f"{self.settings.host}/api/2.2/jobs/runs/list",
+                f"{self.settings.host}{RUNS_LIST_ENDPOINT}",
                 params=params,
                 timeout=60,
             )
@@ -105,13 +96,15 @@ class DatabricksClient:
 
             response.raise_for_status()
 
-            payload = response.json()
-            runs = payload.get("runs", [])
+            payload: dict[str, Any] = response.json()
+            runs: list[dict[str, Any]] = payload.get("runs") or []
 
             all_runs.extend(runs)
 
             logging.info(
-                "Página recuperada: %s runs. Total acumulado: %s.",
+                "Databricks runs page %s retrieved. "
+                "Page records: %s. Accumulated records: %s.",
+                page_number,
                 len(runs),
                 len(all_runs),
             )
@@ -119,47 +112,85 @@ class DatabricksClient:
             # if not payload.get("has_more", False):
             #     break
 
-            page_token = payload.get("next_page_token")
+            next_page_token = payload.get("next_page_token")
 
-            if not page_token:
-                logging.warning(
-                    "Databricks devolvió has_more=true "
-                    "sin next_page_token."
-                )
+            if not next_page_token:
                 break
-            
+
+            page_token = next_page_token
             page_number += 1
 
         logging.info(
-            "Consulta completa. Total de runs obtenidos: %s.",
+            "Databricks runs query completed. Total runs retrieved: %s.",
             len(all_runs),
-        )            
+        )
 
         return all_runs
 
     def get_tasks(self, run_id: int) -> list[dict[str, Any]]:
-        all_tasks: list[dict[str, Any]] = []
+        """
+        Obtiene todas las tareas pertenecientes a un run.
 
-        logging.info("Run id: %s", run_id)
+        Jobs API 2.2 puede paginar el arreglo tasks cuando el run
+        contiene más de 100 tareas.
+        """
 
-        params: dict[str, int | str] = {
-            "run_id": run_id
-        }
-        response = self.session.get(
-            f"{self.settings.host}/api/2.2/jobs/runs/get",
-            params=params,
-            timeout=60,
-        )
-        response.raise_for_status()
+        if run_id <= 0:
+            raise ValueError("run_id must be greater than zero.")
 
-        payload = response.json()
-        tasks = payload.get("tasks", [])
-        all_tasks.extend(tasks)
         logging.info(
-            "Consulta completa. Total de tasks obtenidos: %s.",
+            "Fetching Databricks tasks for run_id=%s.",
+            run_id,
+        )
+
+        all_tasks: list[dict[str, Any]] = []
+        page_token: str | None = None
+        page_number = 1
+
+        while True:
+            params: dict[str, int | str] = {
+                "run_id": run_id,
+            }
+
+            if page_token is not None:
+                params["page_token"] = page_token
+
+            response = self.session.get(
+                f"{self.settings.host}{RUNS_GET_ENDPOINT}",
+                params=params,
+                timeout=60,
+            )
+            response.raise_for_status()
+
+            payload: dict[str, Any] = response.json()
+            tasks: list[dict[str, Any]] = payload.get("tasks") or []
+
+            all_tasks.extend(tasks)
+
+            logging.info(
+                "Databricks tasks page %s retrieved for run_id=%s. "
+                "Page records: %s. Accumulated records: %s.",
+                page_number,
+                run_id,
+                len(tasks),
+                len(all_tasks),
+            )
+
+            next_page_token = payload.get("next_page_token")
+
+            if not next_page_token:
+                break
+
+            page_token = next_page_token
+            page_number += 1
+
+        logging.info(
+            "Databricks tasks query completed for run_id=%s. "
+            "Total tasks retrieved: %s.",
+            run_id,
             len(all_tasks),
-        )           
-        # https://adb-3925217763478917.17.azuredatabricks.net/api/2.1/jobs/runs/get?run_id=507640030715276
+        )
+
         return all_tasks
 
     def close(self) -> None:
@@ -172,4 +203,3 @@ class DatabricksClient:
 
     def __exit__(self, *_: object) -> None:
         self.close()
-

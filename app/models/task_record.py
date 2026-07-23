@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 @dataclass(frozen=True)
@@ -9,8 +9,9 @@ class TaskRecord:
     task_key: str | None
     started_cdmx: datetime | None
     ended_cdmx: datetime | None
-    duration: str | None
+    duration: timedelta | None
     task_type: str | None
+    run_page_url: str | None
     status: str | None
     notebook_path: str | None
     notebook_name: str | None
@@ -31,6 +32,7 @@ class TaskRecord:
             self.ended_cdmx,
             self.duration,
             self.task_type,
+            self.run_page_url,
             self.status,
             self.notebook_path,
             self.notebook_name,

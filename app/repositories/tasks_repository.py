@@ -19,6 +19,7 @@ class TasksRepository:
         ended_cdmx,
         duration,
         task_type,
+        run_page_url,
         status,
         notebook_path,
         notebook_name,
@@ -31,13 +32,15 @@ class TasksRepository:
         parameter_source
     )
     VALUES %s
-    ON CONFLICT (task_run_id, run_id)
+    ON CONFLICT (task_run_id)
     DO UPDATE SET
+        run_id = EXCLUDED.run_id,    
         task_key = EXCLUDED.task_key,
         started_cdmx = EXCLUDED.started_cdmx,
         ended_cdmx = EXCLUDED.ended_cdmx,
         duration = EXCLUDED.duration,
         task_type = EXCLUDED.task_type,
+        run_page_url = EXCLUDED.run_page_url,
         status = EXCLUDED.status,
         notebook_path = EXCLUDED.notebook_path,
         notebook_name = EXCLUDED.notebook_name,

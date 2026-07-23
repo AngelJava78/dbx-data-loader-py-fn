@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
@@ -31,9 +31,9 @@ class RunTransformer:
             }
             return parameters, "JOB_PARAMETERS"
 
-        notebook_params = (
-            (run.get("overriding_parameters") or {}).get("notebook_params") or {}
-        )
+        notebook_params = (run.get("overriding_parameters") or {}).get(
+            "notebook_params"
+        ) or {}
         if notebook_params:
             return notebook_params, "OVERRIDING_PARAMETERS"
 
@@ -47,16 +47,26 @@ class RunTransformer:
         return datetime.fromtimestamp(milliseconds / 1000, tz=CDMX_TZ)
 
     @classmethod
-    def calculate_duration(cls, start_time: Any, end_time: Any) -> str | None:
+    def calculate_duration(
+        cls,
+        start_time: Any,
+        end_time: Any,
+    ) -> timedelta | None:
         start_ms = cls.safe_int(start_time)
         end_ms = cls.safe_int(end_time)
+
         if start_ms is None or end_ms is None:
             return None
 
-        total_seconds = max(0, (end_ms - start_ms) // 1000)
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        return f"{hours:02}:{minutes:02}:{seconds:02}"
+        duration_ms = end_ms - start_ms
+
+        if duration_ms < 0:
+            raise ValueError(
+                "The end time cannot be earlier than the start time. "
+                f"start_time={start_ms}, end_time={end_ms}"
+            )
+
+        return timedelta(milliseconds=duration_ms)
 
     @classmethod
     def extract_workspace_id(cls, run_page_url: str | None) -> int | None:
@@ -87,6 +97,7 @@ class RunTransformer:
             result_state=state.get("result_state"),
             termination_code=termination_details.get("code"),
             workspace_id=cls.extract_workspace_id(run.get("run_page_url")),
+            run_page_url=run.get("run_page_url") or "",
             process_id=cls.safe_int(parameters.get("sr_proceso")),
             subprocess_id=cls.safe_int(parameters.get("sr_subproceso")),
             stage_id=cls.safe_int(parameters.get("sr_etapa")),
